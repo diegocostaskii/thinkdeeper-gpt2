@@ -177,6 +177,7 @@ class GPT(nn.Module):
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
+       
         B, T, C = x.size()
         t = torch.randn(B, T, C//2).to("cuda")
         nn.Parameter(t)
@@ -184,8 +185,7 @@ class GPT(nn.Module):
         linear_layer = linear_layer.to("cuda")
         t = linear_layer(t)
         x = torch.cat((x,t),1)
-        B2, T2, C2 = x.size()
-        print('xsize',B2, T2, C2)
+
         for i in range (1,5):
             for block in self.transformer.h:
                 x = block(x)
@@ -193,6 +193,7 @@ class GPT(nn.Module):
         x = torch.split(x, 256, dim = 1)[-1]
         x = block(x)
         x = self.transformer.ln_f(x)
+        
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             logits = self.lm_head(x)
