@@ -190,8 +190,7 @@ class GPT(nn.Module):
             for block in self.transformer.h:
                 x = block(x)
         x = self.transformer.ln_f(x)
-        x = torch.split(x, 256, dim = 1)[-1]
-        x = block(x)
+        x = block(t)
         x = self.transformer.ln_f(x)
         
         if targets is not None:
