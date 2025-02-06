@@ -185,11 +185,11 @@ def compute_loss(model, batch):
     loss_mask = batch["loss_mask"].to(device)
 
     logits,loss = model(input_ids)
-    print('logits size',logits.size())
+
     shift_logits = logits[:, :-1, :].contiguous()
     shift_labels = input_ids[:, 1:]
+
     shift_mask = loss_mask[:, 1:].contiguous()
-    
     loss_fn = torch.nn.CrossEntropyLoss(reduction='none')
     loss = loss_fn(shift_logits.reshape(-1, shift_logits.size(-1)), shift_labels.reshape(-1))
     loss = loss.view(shift_labels.size()) * shift_mask
