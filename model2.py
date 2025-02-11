@@ -104,7 +104,7 @@ class Block(nn.Module):
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
         return x
-
+    
 @dataclass
 class GPTConfig:
     block_size: int = 1024
@@ -129,11 +129,15 @@ class GPT(nn.Module):
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
-            t = nn.Parameter(torch.randn(64, 256, config.n_embd//2)),
             ln_t = nn.Linear(config.n_embd//2, config.n_embd)
         ))
-
-
+        self.GRU = nn.ModuleDict(dict(
+            gru = nn.GRU(input_size=config.n_embd, hidden_size=config.n_embd,
+                          num_layers=100, batch_first=True),
+            fc1 = nn.Linear(config.n_embd, config.vocab_size),
+            dropout = nn.Dropout(0.2)
+        ))
+        self.t = nn.Parameter(torch.randn(4, 100, config.n_embd//2))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
@@ -181,30 +185,31 @@ class GPT(nn.Module):
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
-        self.transformer.t = self.transformer.ln_t(self.transformer.t)
-        x = torch.cat((x,self.transformer.t),1)
+        t = self.transformer.ln_t(self.t)
+
+        x = torch.cat((x,t),1)
         
         for i in range (1,5):
             for block in self.transformer.h:
                 x = block(x)
-        t_length = self.transformer.t.size(1)
+        t_length = self.t.size(1)
         # 分离出 t
         t_extracted = x[:, -t_length:, :]
 
         # 对分离出的 t 进行进一步的处理
         t_extracted = self.transformer.ln_f(t_extracted)
-
-                # 如果需要继续处理 x，去掉 t 部分
         x = x[:, :-t_length, :]
-        x = self.transformer.ln_f(x)
-
+        h_0 = t_extracted.transpose(0,1).contiguous()
+        out, _ = self.GRU.gru(x,h_0)
+        # 通过全连接层
+        # logits = self.GRU.fc1(out)
+        x = self.transformer.ln_f(out)
+        logits = self.lm_head(x)
         if targets is not None:
-            # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(t_extracted)
+            # 计算对于所有 token 的损失
+            # 注意：需要确保 targets 的形状与 logits 的前两个维度匹配
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
-            # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(t_extracted[:, [-1], :]) # note: using list [-1] to preserve the time dim
             loss = None
 
         return logits, loss
